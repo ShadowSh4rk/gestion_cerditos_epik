@@ -4,6 +4,8 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import EmailVerify from './pages/EmailVerify'
 import ResetPassword from './pages/ResetPassword'
+import Estadistiques from './pages/Estadistiques'
+import Metriques from './pages/Metriques'
 import { ToastContainer} from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css'
 
@@ -16,6 +18,8 @@ const App = () => {
         <Route path='/login' element={<Login/>}/>
         <Route path='/email-verify' element={<EmailVerify/>}/>
         <Route path='/reset-password' element={<ResetPassword/>}/>
+        <Route path='/estadistiques' element={<Estadistiques/>}/>
+        <Route path='/metriques' element={<Metriques/>}/>
       </Routes>
     </div>
   )

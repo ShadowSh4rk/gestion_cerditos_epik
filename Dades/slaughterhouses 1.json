@@ -1,14 +1,15 @@
 [
   {
-    "slaughterhouse_id": "",
-    "name": "",
-    "lat": "",
-    "lon": "",
-    "capacity_per_day": "",
-    "price_per_kg": "",
-    "penalty_15_min": "",
-    "penalty_15_max": "",
-    "penalty_20_min": "",
-    "penalty_20_max": ""
+    "slaughterhouse_id": "S1",
+    "name": "Escorxador Frigorífics Costa Brava (Girona)",
+    "lat": 41.9802,
+    "lon": 2.8011,
+    "daily_capacity_min": 1500,
+    "daily_capacity_max": 2000,
+    "target_daily": 1800,
+    "optimal_weight_range": [105, 115],
+    "penalty_15_range": [100, 105, 115, 120],
+    "penalty_20_below": 100,
+    "penalty_20_above": 120
   }
 ]
