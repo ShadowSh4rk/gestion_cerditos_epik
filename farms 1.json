@@ -1,0 +1,62 @@
+[
+  {
+    "farm_id": "F001",
+    "name": "Granja Can Mas (Osona)",
+    "lat": 42.0155,
+    "lon": 2.3189,
+    "total_pigs": 1240,
+    "weeks_age": 23,
+    "mean_weight_kg": 109.8,
+    "std_weight_kg": 7.5,
+    "max_capacity": 1500,
+    "last_visit_week": null
+  },
+  {
+    "farm_id": "F002",
+    "name": "Granja Cal Pere (Segrià)",
+    "lat": 41.6892,
+    "lon": 0.6781,
+    "total_pigs": 980,
+    "weeks_age": 21,
+    "mean_weight_kg": 102.3,
+    "std_weight_kg": 8.1,
+    "max_capacity": 1200,
+    "last_visit_week": null
+  },
+  {
+    "farm_id": "F003",
+    "name": "Granja La Serra (Gironès)",
+    "lat": 41.9578,
+    "lon": 2.7894,
+    "total_pigs": 1560,
+    "weeks_age": 25,
+    "mean_weight_kg": 118.7,
+    "std_weight_kg": 9.0,
+    "max_capacity": 1800,
+    "last_visit_week": null
+  },
+  {
+    "farm_id": "F004",
+    "name": "Granja Vallès Porcí (Vallès Oriental)",
+    "lat": 41.6453,
+    "lon": 2.2891,
+    "total_pigs": 870,
+    "weeks_age": 22,
+    "mean_weight_kg": 106.5,
+    "std_weight_kg": 6.8,
+    "max_capacity": 1100,
+    "last_visit_week": null
+  },
+  {
+    "farm_id": "F005",
+    "name": "Granja El Pla de l'Estany",
+    "lat": 42.1089,
+    "lon": 2.6597,
+    "total_pigs": 2100,
+    "weeks_age": 24,
+    "mean_weight_kg": 114.2,
+    "std_weight_kg": 8.4,
+    "max_capacity": 2400,
+    "last_visit_week": null
+  }
+]
