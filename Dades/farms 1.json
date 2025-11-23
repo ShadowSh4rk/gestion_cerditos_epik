@@ -2,8 +2,8 @@
   {
     "farm_id": "F001",
     "name": "Granja Can Mas (Osona)",
-    "lat": 42.0155,
-    "lon": 2.3189,
+    "lat": 41.9910,
+    "lon": 2.2880,
     "total_pigs": 1240,
     "weeks_age": 23,
     "mean_weight_kg": 109.8,
@@ -15,8 +15,8 @@
   {
     "farm_id": "F002",
     "name": "Granja Cal Pere (Segrià)",
-    "lat": 41.6892,
-    "lon": 0.6781,
+    "lat": 41.6200,
+    "lon": 0.6200,
     "total_pigs": 980,
     "weeks_age": 21,
     "mean_weight_kg": 102.3,
@@ -28,8 +28,8 @@
   {
     "farm_id": "F003",
     "name": "Granja La Serra (Gironès)",
-    "lat": 41.9578,
-    "lon": 2.7894,
+    "lat": 42.0200,
+    "lon": 2.7800,
     "total_pigs": 1560,
     "weeks_age": 25,
     "mean_weight_kg": 118.7,
@@ -41,8 +41,8 @@
   {
     "farm_id": "F004",
     "name": "Granja Vallès Porcí (Vallès Oriental)",
-    "lat": 41.6453,
-    "lon": 2.2891,
+    "lat": 41.6200,
+    "lon": 2.2200,
     "total_pigs": 870,
     "weeks_age": 22,
     "mean_weight_kg": 106.5,
@@ -54,8 +54,8 @@
   {
     "farm_id": "F005",
     "name": "Granja El Pla de l'Estany",
-    "lat": 42.1089,
-    "lon": 2.9597,
+    "lat": 42.1200,
+    "lon": 2.8600,
     "total_pigs": 2100,
     "weeks_age": 24,
     "mean_weight_kg": 114.2,
@@ -64,11 +64,11 @@
     "total_feed_cost": 0,
     "last_visit_week": -1
   },
-    {
+  {
     "farm_id": "F006",
-    "name": "Granja El Pla de l'Estany",
-    "lat": 42.4089,
-    "lon": 2.7597,
+    "name": "Granja Alta Ribagorça",
+    "lat": 42.4700,
+    "lon": 1.0500,
     "total_pigs": 2100,
     "weeks_age": 24,
     "mean_weight_kg": 114.2,
@@ -77,11 +77,11 @@
     "total_feed_cost": 0,
     "last_visit_week": -1
   },
-    {
+  {
     "farm_id": "F007",
-    "name": "Granja El Pla de l'Estany",
-    "lat": 42.1089,
-    "lon": 2.2497,
+    "name": "Granja Terra Alta",
+    "lat": 41.1000,
+    "lon": 0.3500,
     "total_pigs": 2100,
     "weeks_age": 24,
     "mean_weight_kg": 114.2,
@@ -90,11 +90,11 @@
     "total_feed_cost": 0,
     "last_visit_week": -1
   },
-    {
+  {
     "farm_id": "F008",
-    "name": "Granja El Pla de l'Estany",
-    "lat": 42.8089,
-    "lon": 2.6097,
+    "name": "Granja Baix Empordà",
+    "lat": 41.9500,
+    "lon": 3.1500,
     "total_pigs": 2100,
     "weeks_age": 24,
     "mean_weight_kg": 114.2,

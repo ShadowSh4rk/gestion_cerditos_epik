@@ -2,39 +2,44 @@ import asyncio
 import random
 import numpy as np
 import pandas as pd
-import math
-from fastapi import FastAPI, WebSocket, HTTPException
+import json
+import traceback
+import os
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-# --- CONFIGURACIÓ I CONSTANTS ---
+# --- CONFIGURACIÓ GLOBAL ---
 PREU_KG = 1.56
-COST_FIX_CAMIO_SETMANAL = 2000
-CAPACITAT_ESCORXADOR_DIARIA = 1800
-DIES_SIMULACIO = 15 # Definit per saber quan s'acaba la simulació total
-
-CAMIO_PETIT = {'cap': 10000, 'cost_km': 1.15, 'nom': '10T'}
-CAMIO_GRAN = {'cap': 20000, 'cost_km': 1.25, 'nom': '20T'}
+DIES_SIMULACIO = 15
 
 # --- CLASSES ---
 
 class Farm:
-    def __init__(self, id, lat, lon, inventory, mean_weight):
-        self.id = id
-        self.loc = np.array([lat, lon])
-        self.inventory = inventory
-        self.mean_weight = mean_weight
-        self.std_dev = mean_weight * 0.05
+    def __init__(self, data):
+        self.id = data['farm_id']
+        self.name = data['name']
+        self.loc = np.array([float(data['lat']), float(data['lon'])])
+        self.inventory = data['total_pigs']
+        self.mean_weight = data['mean_weight_kg']
+        self.std_dev = data.get('std_weight_kg', self.mean_weight * 0.05)
         self.last_visit_day = -999
         
     def grow_pigs(self):
         if self.inventory > 0:
-            self.mean_weight += 0.71
+            self.mean_weight += 0.71 
             
     def get_batch_ready(self, max_kg):
         if self.inventory == 0: return 0, [], 0
+        
         avg_weight = self.mean_weight
-        max_pigs = int(max_kg / avg_weight)
-        num_pigs = min(self.inventory, max_pigs)
+        if avg_weight <= 0: return 0, [], 0
+
+        max_pigs_space = int(max_kg / avg_weight)
+        if max_pigs_space < 1: return 0, [], 0
+
+        num_pigs = min(self.inventory, max_pigs_space)
+        if num_pigs <= 0: return 0, [], 0
+
         weights = np.random.normal(self.mean_weight, self.std_dev, num_pigs)
         return num_pigs, weights.tolist(), np.sum(weights)
 
@@ -44,29 +49,56 @@ class Farm:
     def to_dict(self):
         return {
             "id": self.id,
+            "name": self.name,
             "lat": self.loc[0].item(), 
             "lon": self.loc[1].item(),
             "inventory": self.inventory,
             "avg_weight": round(self.mean_weight, 2)
         }
 
-# --- SIMULADOR EN TEMPS REAL (AMB LOGGING) ---
+# --- SIMULADOR EN TEMPS REAL ---
 
 class RealTimeSimulation:
     def __init__(self):
         self.farms = []
-        self.slaughterhouse_loc = np.array([41.38, 2.16]) 
-        self.generate_data()
+        self.transports = []
+        self.slaughterhouse_config = {}
+        self.slaughterhouse_loc = np.array([0.0, 0.0]) 
         self.daily_logs = [] 
-        self.current_sim_day = 1 # Seguidor de dies
+        self.current_sim_day = 1
+        self.data_loaded = False
+        
+        self.load_data()
 
-    def generate_data(self):
-        for i in range(15):
-            lat = 41.38 + random.uniform(-0.1, 0.1)
-            lon = 2.16 + random.uniform(-0.1, 0.1)
-            inv = random.randint(500, 2000)
-            w = random.uniform(95, 112)
-            self.farms.append(Farm(f"F-{i+1:02d}", lat, lon, inv, w))
+    def load_data(self):
+        print("--- CARGANDO DATOS ---")
+        try:
+            if os.path.exists('Dades/slaughterhouses 1.json'):
+                with open('Dades/slaughterhouses 1.json', 'r', encoding='utf-8') as f:
+                    s_data = json.load(f)
+                    self.slaughterhouse_config = s_data[0]
+                    self.slaughterhouse_loc = np.array([
+                        float(self.slaughterhouse_config['lat']), 
+                        float(self.slaughterhouse_config['lon'])
+                    ])
+                    print(f"✅ Matadero: {self.slaughterhouse_config['name']}")
+            else:
+                self.slaughterhouse_loc = np.array([41.98, 2.80])
+                self.slaughterhouse_config = {'daily_capacity_max': 1800}
+
+            if os.path.exists('Dades/transports 1.json'):
+                with open('Dades/transports 1.json', 'r', encoding='utf-8') as f:
+                    self.transports = json.load(f)
+                    print(f"✅ Transportes: {len(self.transports)} unidades.")
+
+            if os.path.exists('Dades/farms 1.json'):
+                with open('Dades/farms 1.json', 'r', encoding='utf-8') as f:
+                    farms_data = json.load(f)
+                    self.farms = [Farm(f) for f in farms_data]
+                    print(f"✅ Granjas: {len(self.farms)} ubicaciones.")
+                    self.data_loaded = True
+        except Exception as e:
+            print(f"❌ Error cargando datos: {e}")
 
     def calculate_distance(self, loc1, loc2):
         return np.linalg.norm(loc1 - loc2) * 111
@@ -74,14 +106,16 @@ class RealTimeSimulation:
     def calculate_economics(self, weights):
         revenue = 0
         penalties = 0
-        
+        p15 = self.slaughterhouse_config.get('penalty_15_range', [100, 105, 115, 120])
+        p20_low = self.slaughterhouse_config.get('penalty_20_below', 100)
+        p20_high = self.slaughterhouse_config.get('penalty_20_above', 120)
+
         for w in weights:
             val = w * PREU_KG
             penalty_rate = 0
-            
-            if (100 <= w < 105) or (115 < w <= 120):
+            if (p15[0] <= w < p15[1]) or (p15[2] < w <= p15[3]):
                 penalty_rate = 0.15
-            elif w < 100 or w > 120:
+            elif w < p20_low or w > p20_high:
                 penalty_rate = 0.20
             
             loss = val * penalty_rate
@@ -90,168 +124,248 @@ class RealTimeSimulation:
             
         return revenue, penalties, penalties / revenue if revenue else 0
 
+    def get_best_transport(self, load_kg):
+        if not self.transports:
+            return {'nom': 'Generic', 'type': 'normal', 'cap': 20000, 'cost_km': 1.25, 'fixed_weekly': 2000}
+
+        suitable = [t for t in self.transports if t['capacity_tons'] * 1000 >= load_kg]
+        if not suitable:
+            best = max(self.transports, key=lambda x: x['capacity_tons'])
+        else:
+            best = min(suitable, key=lambda x: x['capacity_tons'])
+            
+        return {
+            'nom': best['transport_id'],
+            'type': best['type'],
+            'cap': best['capacity_tons'] * 1000, 
+            'cost_km': best['cost_per_km'],
+            'fixed_weekly': best['weekly_fixed_cost']
+        }
+
     def calculate_trip_metrics(self, route_stops, current_load_kg):
-        dist = self.calculate_distance(self.slaughterhouse_loc, route_stops[0].loc)
+        dist = self.calculate_distance(self.slaughterhouse_loc, route_stops[0]['farm'].loc)
         for i in range(len(route_stops)-1):
-            dist += self.calculate_distance(route_stops[i].loc, route_stops[i+1].loc)
-        dist += self.calculate_distance(route_stops[-1].loc, self.slaughterhouse_loc)
+            dist += self.calculate_distance(route_stops[i]['farm'].loc, route_stops[i+1]['farm'].loc)
+        dist += self.calculate_distance(route_stops[-1]['farm'].loc, self.slaughterhouse_loc)
         
-        final_truck = CAMIO_GRAN if current_load_kg > CAMIO_PETIT['cap'] else CAMIO_PETIT
-        trip_cost_variable = dist * final_truck['cost_km'] * (current_load_kg / final_truck['cap'])
+        final_truck = self.get_best_transport(current_load_kg)
+        trip_cost_variable = dist * final_truck['cost_km']
         
         return dist, final_truck, trip_cost_variable
 
-    async def animate_travel(self, websocket, start_loc, end_loc, truck_id, load, steps=20):
-        lat_steps = np.linspace(start_loc[0], end_loc[0], steps)
-        lon_steps = np.linspace(start_loc[1], end_loc[1], steps)
+    # --- LÓGICA DE ANIMACIÓN CONCURRENTE ---
+    async def animate_single_route(self, websocket, route_data, truck_vis_id):
+        """
+        Anima UN solo camión. Se llamará en paralelo con otros.
+        """
+        current_loc = self.slaughterhouse_loc
+        pigs_on_board = 0
         
-        for i in range(steps):
-            current_pos = [lat_steps[i].item(), lon_steps[i].item()]
+        # 1. Recorrido de IDA (parada por parada)
+        for stop in route_data['route_stops']:
+            farm_obj = stop['farm']
+            pigs_picked = stop['pigs_count']
             
+            # Movimiento hacia la granja
+            steps = 20
+            lat_steps = np.linspace(current_loc[0], farm_obj.loc[0], steps)
+            lon_steps = np.linspace(current_loc[1], farm_obj.loc[1], steps)
+            
+            for i in range(steps):
+                await websocket.send_json({
+                    "type": "TRUCK_UPDATE",
+                    "truck_id": truck_vis_id,
+                    "position": [lat_steps[i].item(), lon_steps[i].item()],
+                    "pigs_on_board": pigs_on_board,
+                    "status": "MOVING_TO_FARM"
+                })
+                await asyncio.sleep(0.05) # Velocidad de animación
+            
+            # LLEGADA A LA GRANJA: Cargar y actualizar Inventario Visualmente
+            pigs_on_board += pigs_picked
             await websocket.send_json({
                 "type": "TRUCK_UPDATE",
-                "truck_id": truck_id,
-                "position": current_pos,
-                "pigs_on_board": load,
-                "status": "MOVING"
+                "truck_id": truck_vis_id,
+                "position": [farm_obj.loc[0].item(), farm_obj.loc[1].item()],
+                "pigs_on_board": pigs_on_board,  # ahora sí muestra los cerdos reales
+                "status": "LOADED"
             })
-            await asyncio.sleep(0.05) 
+            current_loc = farm_obj.loc
+            
+            # --- UPDATE VITAL: Notificar al frontend que esta granja ha perdido cerdos AHORA ---
+            await websocket.send_json({
+                "type": "FARM_UPDATE",
+                "farm_id": farm_obj.id,
+                "new_inventory": stop['inventory_after_pickup']
+            })
+            
+            # Pequeña pausa de carga
+            await asyncio.sleep(0.2)
 
-    def print_terminal_log_route(self, route_data, trucks_used_count):
-        # FUNCIÓ PER IMPRIMIR DETALLS DE LA RUTA A LA TERMINAL
-        print(f" > RUTA {trucks_used_count} ({route_data['final_truck']['nom']}):")
-        print(f"   - Origen/Stops: {' -> '.join([f.id for f in route_data['route_stops']])}")
-        print(f"   - Porcs/Kg: {route_data['route_pigs_count']} porcs | {int(route_data['current_load_kg'])} kg")
-        print(f"   - Dist/Cost: {route_data['dist']:.1f} km | Cost Var: {route_data['trip_cost_variable']:.2f} €")
-        print(f"   - Ingressos Nets: {route_data['rev']:.2f} € | Penalització: {route_data['pen']:.2f} € ({route_data['pen_ratio']*100:.1f}%)")
-        print("-" * 40)
-
-    def print_terminal_log_summary(self, log_entry):
-        # FUNCIÓ PER IMPRIMIR EL RESUM DIARI I ACUMULAT A LA TERMINAL
-        print(f"\n--- RESUM DIA {log_entry['Dia']} ---")
-        print(f"  Total Processat: {log_entry['Porcs Processats']} porcs amb {log_entry['Camions Usats']} camions.")
-        print(f"  💸 BENEFICI NET: {log_entry['Benefici Net Diari']:,.2f} €")
-        print(f"  (Ingressos: {log_entry['Ingressos Nets']:,.2f} € | Despeses: {log_entry['Costos Var. Transp'] + log_entry['Costos Fixos']:,.2f} €)")
-        print(f"--------------------------")
+        # 2. Recorrido de VUELTA (Matadero)
+        steps_return = 20
+        lat_steps = np.linspace(current_loc[0], self.slaughterhouse_loc[0], steps_return)
+        lon_steps = np.linspace(current_loc[1], self.slaughterhouse_loc[1], steps_return)
         
-        df_results = pd.DataFrame(self.daily_logs)
-        if len(self.daily_logs) > 0:
-            print(f"\n# LOG ACUMULAT (Dia {log_entry['Dia']} / {DIES_SIMULACIO})")
-            print(df_results.to_string(index=False))
-            print(f"💰 BENEFICI TOTAL ACUMULAT: {df_results['Benefici Net Diari'].sum():,.2f} €")
-            print("#" * 60)
+        for i in range(steps_return):
+            await websocket.send_json({
+                "type": "TRUCK_UPDATE",
+                "truck_id": truck_vis_id,
+                "position": [lat_steps[i].item(), lon_steps[i].item()],
+                "pigs_on_board": pigs_on_board,
+                "status": "RETURNING"
+            })
+            await asyncio.sleep(0.05)
+            
+        # 3. Llegada Final
+        await websocket.send_json({
+            "type": "TRUCK_ARRIVED",
+            "truck_id": truck_vis_id,
+            "pigs_delivered": route_data['route_pigs_count'],
+            "metrics_trip": {"revenue": round(route_data['rev'], 2), "cost": round(route_data['trip_cost_variable'], 2)}
+        })
 
 
     async def run_day_stream(self, websocket, day):
-        # LOG INICI DIA A TERMINAL
-        print(f"\n{'='*50}\n🚛 DIA {day} - INICI DE LA PLANIFICACIÓ\n{'='*50}")
+        print(f"\n{'='*40}\n🚛 DIA {day} - PLANIFICANDO LOGÍSTICA\n{'='*40}")
 
         daily_revenue = 0
         daily_transport_cost_var = 0
-        trucks_used_count = 0
+        daily_fixed_costs = 0
         pigs_processed = 0
+        
+        daily_capacity = self.slaughterhouse_config.get('daily_capacity_max', 1800)
 
-        # Creixement de porcs i enviament d'estat inicial
+        # 1. Crecimiento
         for f in self.farms: f.grow_pigs()
+        
+        # 2. Mapa Inicial
         await websocket.send_json({
             "type": "INIT_FARMS",
             "farms": [f.to_dict() for f in self.farms],
-            "slaughterhouse": [41.38, 2.16]
+            "slaughterhouse": [self.slaughterhouse_loc[0].item(), self.slaughterhouse_loc[1].item()]
         })
 
+        # --- FASE 1: PLANIFICACIÓN PURA (Matemática) ---
+        # Calculamos TODAS las rutas del día ANTES de empezar a animar para optimizar
+        
         available_farms = [f for f in self.farms if (day - f.last_visit_day) >= 7 and f.inventory > 0]
         available_farms.sort(key=lambda x: x.mean_weight, reverse=True)
         
-        # Bucle de Planificació
-        while pigs_processed < CAPACITAT_ESCORXADOR_DIARIA and len(available_farms) > 0:
-            
-            truck_type = CAMIO_GRAN
+        planned_routes = [] # Aquí guardaremos todas las rutas a ejecutar
+        
+        while pigs_processed < daily_capacity and len(available_farms) > 0:
+            max_truck_cap_kg = 20000 
             current_load_kg = 0
-            route_stops = []
+            
+            # Estructura temporal para la ruta
+            route_stops_data = [] # Guardaremos {farm: obj, pigs: int, inventory_after: int}
             route_weights = []
             
-            # Recollida de porcs
-            while len(route_stops) < 3 and current_load_kg < truck_type['cap'] and len(available_farms) > 0:
-                target_farm = available_farms.pop(0) 
-                space_kg = truck_type['cap'] - current_load_kg
+            # Llenar 1 camión
+            stops_count = 0
+            while stops_count < 3 and current_load_kg < max_truck_cap_kg and len(available_farms) > 0:
+                target_farm = available_farms.pop(0) # Extraer la mejor disponible
+                space_kg = max_truck_cap_kg - current_load_kg
+                
                 num, weights, total_w = target_farm.get_batch_ready(space_kg)
                 
                 if num > 0:
+                    # Actualizamos datos internos YA (Commit)
                     target_farm.commit_sale(num)
                     target_farm.last_visit_day = day
-                    route_stops.append(target_farm)
+                    
+                    route_stops_data.append({
+                        'farm': target_farm,
+                        'pigs_count': num,
+                        'inventory_after_pickup': target_farm.inventory # Dato clave para el frontend
+                    })
+                    
                     current_load_kg += total_w
                     route_weights.extend(weights)
+                    stops_count += 1
                 
-            if not route_stops: continue
+                # Si no se visita (num=0), ya se ha hecho pop, así que "pasa turno" hoy.
             
+            if not route_stops_data:
+                break
+            
+            # Cálculos de la ruta cerrada
             route_pigs_count = len(route_weights)
-            pigs_processed += route_pigs_count
-            trucks_used_count += 1
-
-            # 1. Càlculs econòmics i de ruta
-            dist, final_truck, trip_cost_variable = self.calculate_trip_metrics(route_stops, current_load_kg)
+            dist, final_truck, trip_cost_variable = self.calculate_trip_metrics(route_stops_data, current_load_kg)
             rev, pen, pen_ratio = self.calculate_economics(route_weights)
-
+            
+            # Acumuladores del día
+            pigs_processed += route_pigs_count
             daily_revenue += rev
             daily_transport_cost_var += trip_cost_variable
+            daily_fixed_costs += (final_truck['fixed_weekly'] / 5.0)
             
-            # 2. LOG TERMINAL - DETALL DE LA RUTA
-            route_data = {'route_stops': route_stops, 'current_load_kg': current_load_kg, 'route_pigs_count': route_pigs_count, 
-                          'dist': dist, 'final_truck': final_truck, 'trip_cost_variable': trip_cost_variable, 
-                          'rev': rev, 'pen': pen, 'pen_ratio': pen_ratio}
-            self.print_terminal_log_route(route_data, trucks_used_count)
-
-
-            # 3. ANIMACIÓ WEB SOCKET
-            truck_id = f"TRUCK-{random.randint(1000,9999)}"
-            current_loc = self.slaughterhouse_loc
-            
-            for farm in route_stops:
-                await self.animate_travel(websocket, current_loc, farm.loc, truck_id, current_load_kg)
-                current_loc = farm.loc
-            
-            await self.animate_travel(websocket, current_loc, self.slaughterhouse_loc, truck_id, current_load_kg)
-            
-            # 4. FINALITZACIÓ DEL VIATGE
-            await websocket.send_json({
-                "type": "TRUCK_ARRIVED",
-                "truck_id": truck_id,
-                "pigs_delivered": route_pigs_count,
-                "total_processed": pigs_processed,
-                "metrics_trip": {"revenue": round(rev, 2), "cost": round(trip_cost_variable, 2)}
+            # Guardamos la ruta planificada para ejecutarla visualmente
+            planned_routes.append({
+                'route_stops': route_stops_data,
+                'route_pigs_count': route_pigs_count,
+                'current_load_kg': current_load_kg,
+                'dist': dist,
+                'final_truck': final_truck,
+                'trip_cost_variable': trip_cost_variable,
+                'rev': rev,
+                'pen': pen
             })
+
+        print(f"📊 Rutas planificadas: {len(planned_routes)}. Procesando visualización paralela...")
+
+        # --- FASE 2: EJECUCIÓN VISUAL (Logística Paralela) ---
+        # Ejecutaremos las rutas en "batches" (lotes) según el número de camiones disponibles
+        # Si tenemos 5 camiones, lanzamos 5 rutas a la vez.
+        
+        available_truck_count = len([t for t in self.transports if t['type'] == 'normal']) or 3 # Por defecto 3 si no carga
+        
+        # Dividir planned_routes en trozos (chunks)
+        chunked_routes = [planned_routes[i:i + available_truck_count] for i in range(0, len(planned_routes), available_truck_count)]
+        
+        total_trips_visual = 0
+        
+        for batch_index, batch in enumerate(chunked_routes):
+            print(f" 🚀 Lanzando oleada {batch_index + 1} con {len(batch)} camiones simultáneos.")
+            
+            tasks = []
+            for i, route in enumerate(batch):
+                total_trips_visual += 1
+                # ID visual único para que el frontend distinga los camiones
+                truck_vis_id = f"T{total_trips_visual}-{route['final_truck']['nom']}"
+                
+                # Creamos la tarea asíncrona pero NO la esperamos individualmente
+                tasks.append(self.animate_single_route(websocket, route, truck_vis_id))
+            
+            # Esperamos a que TODA la oleada termine antes de lanzar la siguiente
+            # (Opcional: se podría hacer más fluido, pero por orden visual es mejor así)
+            await asyncio.gather(*tasks)
+            
+            # Pequeña pausa entre oleadas
             await asyncio.sleep(0.5)
 
-        # 5. TANCAMENT DEL DIA I LOGGING AGREGAT
-        
-        fixed_costs = trucks_used_count * (COST_FIX_CAMIO_SETMANAL / 5) 
-        daily_profit = daily_revenue - daily_transport_cost_var - fixed_costs
+        # --- RESUMEN FINAL DEL DÍA ---
+        daily_profit = daily_revenue - daily_transport_cost_var - daily_fixed_costs
         
         log_entry = {
             'Dia': day,
             'Porcs Processats': pigs_processed,
-            'Camions Usats': trucks_used_count,
+            'Camions Usats': len(planned_routes),
             'Ingressos Nets': round(daily_revenue, 2),
             'Costos Var. Transp': round(daily_transport_cost_var, 2),
-            'Costos Fixos': round(fixed_costs, 2),
+            'Costos Fixos': round(daily_fixed_costs, 2),
             'Benefici Net Diari': round(daily_profit, 2)
         }
         
         self.daily_logs.append(log_entry)
+        print(f"🏁 FIN DIA {day}. Beneficio: {daily_profit:.2f}€")
         
-        # 6. LOG TERMINAL - RESUM DIARI I TAULA ACUMULADA
-        self.print_terminal_log_summary(log_entry)
-        
-        # Enviar log agregat a React (per si el frontend vol taula de resultats)
         await websocket.send_json({
             "type": "DAILY_SUMMARY",
             "summary": log_entry,
             "cumulative_profit": round(sum(log['Benefici Net Diari'] for log in self.daily_logs), 2)
         })
-        
-        return pigs_processed
-
 
 # --- API CONFIG ---
 app = FastAPI()
@@ -262,22 +376,31 @@ sim_instance = RealTimeSimulation()
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    print("✅ Cliente WebSocket conectado.")
     
-    if sim_instance.current_sim_day > DIES_SIMULACIO:
-        await websocket.send_json({"type": "SIM_FINISHED", "msg": f"Simulació de {DIES_SIMULACIO} dies finalitzada. Connecti's més tard."})
-        await websocket.close()
-        return
-
     try:
-        # Executar el dia actual de simulació
-        await sim_instance.run_day_stream(websocket, day=sim_instance.current_sim_day)
-        
-        # Si el dia s'ha executat amb èxit, avancem al següent
-        sim_instance.current_sim_day += 1
-        await websocket.send_json({"type": "END_OF_SIM", "msg": f"Dia {sim_instance.current_sim_day-1} completat. Proper dia: {sim_instance.current_sim_day}"})
+        if sim_instance.current_sim_day > DIES_SIMULACIO or not sim_instance.data_loaded:
+             sim_instance.current_sim_day = 1
+             sim_instance.daily_logs = []
+             sim_instance.farms = []
+             sim_instance.load_data()
 
+        if not sim_instance.farms:
+             await websocket.send_json({"type": "ERROR", "msg": "No se han cargado granjas."})
+             return
+
+        while sim_instance.current_sim_day <= DIES_SIMULACIO:
+            await sim_instance.run_day_stream(websocket, day=sim_instance.current_sim_day)
+            sim_instance.current_sim_day += 1
+            
+            if sim_instance.current_sim_day <= DIES_SIMULACIO:
+                await websocket.send_json({"type": "END_OF_SIM", "msg": "Esperando siguiente día..."})
+                await asyncio.sleep(2) 
+            else:
+                await websocket.send_json({"type": "SIMULATION_COMPLETE", "msg": "Simulación finalizada."})
+
+    except WebSocketDisconnect:
+        print("🔌 Cliente desconectado.")
     except Exception as e:
-        print(f"ERROR DURANT LA SIMULACIÓ: {e}")
-        await websocket.send_json({"type": "ERROR", "msg": str(e)})
-    finally:
-        await websocket.close()
+        print(f"❌ ERROR CRÍTICO: {e}")
+        traceback.print_exc()

@@ -1,14 +1,16 @@
 import { useEffect, useRef } from "react";
-import L from "leaflet";
+import L, { popup } from "leaflet";
 import farms from "../../../Dades/farms 1.json";
 import slaughterhouses from "../../../Dades/slaughterhouses 1.json"
 import green_sh from "../assets/granja_verd.png"
 import yellow_sh from "../assets/granja_groc.png"
 import red_sh from "../assets/granja_vermell.png"
+import truck from "../assets/camio.png"
 
 export default function Map() {
   const mapRef = useRef(null); // Ref to the div
 
+  const trucksRef = useRef({}); 
   //funcion de probabilidad
 
   function normalCDF(x, mean, std) {
@@ -63,20 +65,27 @@ function erf(x) {
   popupAnchor: [0, -28],
     });
 
+    const transport = L.icon({
+  iconUrl: truck,
+  iconSize: [52, 52],
+  iconAnchor: [16, 32],
+  popupAnchor: [0, -28],
+    });
+
+
   useEffect(() => {
-    if (!mapRef.current) return; 
+  if (!mapRef.current) return;
 
-    const map = L.map(mapRef.current).setView([41.703679, 0.636083], 11);
+  const map = L.map(mapRef.current).setView([41.703679, 0.636083], 11);
 
-    L
-      .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution:
-          '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      })
-      .addTo(map);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19
+  }).addTo(map);
 
-    // ubicacions granges
+  const testTruck = L.marker([41.71, 0.64], { icon: transport }).addTo(map);
+testTruck.bindPopup("Camión de prueba");
+
+  // ubicacions granges
     farms.forEach(farm => {
 
         const prob = normalCDF(115, farm.mean_weight_kg, farm.std_weight_kg) - normalCDF(105, farm.mean_weight_kg, farm.std_weight_kg)
@@ -129,10 +138,55 @@ function erf(x) {
     marker.closePopup();
   });
     });
+  // Guarda el mapa perquè altres efectes el puguin usar
+  mapRef.current._leaflet_map = map;
+}, []);
 
-  }, []);
 
+useEffect(() => {
+  const map = mapRef.current?._leaflet_map;
+  if (!map) return;   // si el mapa no existeix, no fem res encara
 
+  const ws = new WebSocket("ws://localhost:8000/ws");
+
+  ws.onopen = () => console.log("WS connectat");
+  ws.onerror = (err) => console.error("WS error:", err);
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === "TRUCK_UPDATE") {
+    const pos = data.position;
+
+    let marker = trucksRef.current[data.truck_id];
+
+    if (marker) {
+      // Actualizar posición
+      marker.setLatLng(pos);
+
+      // Actualizar popup si ya existe
+      if (marker.getPopup()) {
+        marker.setPopupContent(`${data.truck_id} - ${data.pigs_on_board} pigs`);
+      }
+    } else {
+      // Crear marcador si no existe
+      marker = L.marker(pos, { icon: transport }).addTo(map);
+      marker.bindPopup(`${data.truck_id} - ${data.pigs_on_board} pigs`, {
+        closeOnClick: false,
+        autoClose: false
+      });
+
+      // Popups en hover
+      marker.on("mouseover", () => marker.openPopup());
+      marker.on("mouseout", () => marker.closePopup());
+
+      // Guardamos el marcador
+      trucksRef.current[data.truck_id] = marker;
+    }
+  }
+};
+
+  return () => ws.close();
+}, []);
 
   return <div ref={mapRef} className="w-full h-full" />; // attach ref here
 }
