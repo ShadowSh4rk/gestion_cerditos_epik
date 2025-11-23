@@ -9,7 +9,8 @@
     "mean_weight_kg": 109.8,
     "std_weight_kg": 7.5,
     "max_capacity": 1500,
-    "last_visit_week": null
+    "total_feed_cost": 0,
+    "last_visit_week": -1
   },
   {
     "farm_id": "F002",
@@ -21,7 +22,8 @@
     "mean_weight_kg": 102.3,
     "std_weight_kg": 8.1,
     "max_capacity": 1200,
-    "last_visit_week": null
+    "total_feed_cost": 0,
+    "last_visit_week": -1
   },
   {
     "farm_id": "F003",
@@ -33,7 +35,8 @@
     "mean_weight_kg": 118.7,
     "std_weight_kg": 9.0,
     "max_capacity": 1800,
-    "last_visit_week": null
+    "total_feed_cost": 0,
+    "last_visit_week": -1
   },
   {
     "farm_id": "F004",
@@ -45,18 +48,59 @@
     "mean_weight_kg": 106.5,
     "std_weight_kg": 6.8,
     "max_capacity": 1100,
-    "last_visit_week": null
+    "total_feed_cost": 0,
+    "last_visit_week": -1
   },
   {
     "farm_id": "F005",
     "name": "Granja El Pla de l'Estany",
     "lat": 42.1089,
-    "lon": 2.6597,
+    "lon": 2.9597,
     "total_pigs": 2100,
     "weeks_age": 24,
     "mean_weight_kg": 114.2,
     "std_weight_kg": 8.4,
     "max_capacity": 2400,
-    "last_visit_week": null
+    "total_feed_cost": 0,
+    "last_visit_week": -1
+  },
+    {
+    "farm_id": "F006",
+    "name": "Granja El Pla de l'Estany",
+    "lat": 42.4089,
+    "lon": 2.7597,
+    "total_pigs": 2100,
+    "weeks_age": 24,
+    "mean_weight_kg": 114.2,
+    "std_weight_kg": 8.4,
+    "max_capacity": 2400,
+    "total_feed_cost": 0,
+    "last_visit_week": -1
+  },
+    {
+    "farm_id": "F007",
+    "name": "Granja El Pla de l'Estany",
+    "lat": 42.1089,
+    "lon": 2.2497,
+    "total_pigs": 2100,
+    "weeks_age": 24,
+    "mean_weight_kg": 114.2,
+    "std_weight_kg": 8.4,
+    "max_capacity": 2400,
+    "total_feed_cost": 0,
+    "last_visit_week": -1
+  },
+    {
+    "farm_id": "F008",
+    "name": "Granja El Pla de l'Estany",
+    "lat": 42.8089,
+    "lon": 2.6097,
+    "total_pigs": 2100,
+    "weeks_age": 24,
+    "mean_weight_kg": 114.2,
+    "std_weight_kg": 8.4,
+    "max_capacity": 2400,
+    "total_feed_cost": 0,
+    "last_visit_week": -1
   }
 ]
