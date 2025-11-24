@@ -196,7 +196,10 @@ class RealTimeSimulation:
             await websocket.send_json({
                 "type": "FARM_UPDATE",
                 "farm_id": farm_obj.id,
-                "new_inventory": stop['inventory_after_pickup']
+                "farm_name": farm_obj.name,
+                "new_inventory": stop['inventory_after_pickup'],
+                "num_pigs_loaded": stop['pigs_loaded_today'],
+                "avg_weight": stop['avg_weight']
             })
             
             # Pequeña pausa de carga
@@ -278,7 +281,9 @@ class RealTimeSimulation:
                     route_stops_data.append({
                         'farm': target_farm,
                         'pigs_count': num,
-                        'inventory_after_pickup': target_farm.inventory # Dato clave para el frontend
+                        'inventory_after_pickup': target_farm.inventory,
+                        'pigs_loaded_today': num,                   # ✅ fix
+                        'avg_weight': round(np.mean(weights), 2)   # ✅ optional
                     })
                     
                     current_load_kg += total_w
@@ -361,6 +366,55 @@ class RealTimeSimulation:
         self.daily_logs.append(log_entry)
         print(f"🏁 FIN DIA {day}. Beneficio: {daily_profit:.2f}€")
         
+        #METRICAS DEL MATADERO
+        # n porcs sacrificats
+        total_pigs_delivered = sum(route['route_pigs_count'] for route in planned_routes)
+        #pes viu total
+        total_live_weight = sum(route['current_load_kg'] for route in planned_routes)
+        #pes total de canals
+        total_carcass_weight = total_live_weight * 0.75
+        #pes viu mitja
+        avg_live_weight = total_live_weight / total_pigs_delivered if total_pigs_delivered > 0 else 0
+        #pes mitja de canal
+        avg_carcass_weight = total_carcass_weight / total_pigs_delivered if total_pigs_delivered > 0 else 0
+        #capacitat d'operacio
+        capacity_utilization = total_pigs_delivered / self.slaughterhouse_config.get('daily_capacity_max', 1800)
+
+        slaughterhouse_metrics = {
+            "pigs_delivered": total_pigs_delivered,
+            "live_weight_total": round(total_live_weight, 2),
+            "carcass_weight_total": round(total_carcass_weight, 2),
+            "avg_live_weight": round(avg_live_weight, 2),
+            "avg_carcass_weight": round(avg_carcass_weight, 2),
+            "capacity_utilization": round(capacity_utilization, 2)
+        }
+
+        #ENVIAMOS LAS METRICAS DEL MATADERO
+        await websocket.send_json({
+            "type": "SLAUGHTERHOUSE_UPDATE",
+            "metrics": slaughterhouse_metrics
+        })
+
+        #TRUCK METRICS
+
+        truck_metrics_list = []
+        for idx, route in enumerate(planned_routes, start=1):
+            truck_id = f"T{idx}-{route['final_truck']['nom']}"
+            truck_metrics_list.append({
+                "truck_id": truck_id,
+                "load_kg": round(route['current_load_kg'], 2),
+                "num_pigs": route['route_pigs_count'],
+                "avg_live_weight": round(route['current_load_kg'] / route['route_pigs_count'], 2) if route['route_pigs_count'] else 0,
+                "farms_visited": len(route['route_stops'])
+            })
+
+        #ENVIAMOS LAS METRICAS DE CAMION
+        await websocket.send_json({
+            "type": "TRUCKS_UPDATE",
+            "trucks": truck_metrics_list
+        })
+
+        #ENVIAMOS EL RESUMEN DIARIO
         await websocket.send_json({
             "type": "DAILY_SUMMARY",
             "summary": log_entry,

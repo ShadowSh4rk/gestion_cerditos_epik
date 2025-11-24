@@ -11,6 +11,8 @@ export default function Map() {
   const mapRef = useRef(null); // Ref to the div
 
   const trucksRef = useRef({}); 
+  const slaughterMarkersRef = useRef({}); 
+  const farmsMarkersRef = useRef({});
   //funcion de probabilidad
 
   function normalCDF(x, mean, std) {
@@ -72,118 +74,162 @@ function erf(x) {
   popupAnchor: [0, -28],
     });
 
-
-  useEffect(() => {
+useEffect(() => {
   if (!mapRef.current) return;
 
   const map = L.map(mapRef.current).setView([41.703679, 0.636083], 11);
 
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19
-  }).addTo(map);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
   const testTruck = L.marker([41.71, 0.64], { icon: transport }).addTo(map);
-testTruck.bindPopup("Camión de prueba");
+  testTruck.bindPopup("Camión de prueba");
 
-  // ubicacions granges
-    farms.forEach(farm => {
+  // === MARCADORES DE GRANJAS ===
+  farms.forEach(farm => {
+  const prob = normalCDF(115, farm.mean_weight_kg, farm.std_weight_kg) -
+               normalCDF(105, farm.mean_weight_kg, farm.std_weight_kg);
+  const ready_pigs = Math.round(farm.total_pigs * prob);
 
-        const prob = normalCDF(115, farm.mean_weight_kg, farm.std_weight_kg) - normalCDF(105, farm.mean_weight_kg, farm.std_weight_kg)
+  const marker = L.marker([farm.lat, farm.lon]).addTo(map);
 
-        const ready_pigs = Math.round(farm.total_pigs * prob)
+  marker.bindPopup(`
+    <strong>${farm.name}</strong> <br>
+    Total porcs: ${farm.total_pigs} <br>
+    Porcs a recollir: ${ready_pigs}
+  `);
 
-      const marker = L.marker([farm.lat, farm.lon]).addTo(map)
-      const popup = L.popup({ closeOnClick: false, autoClose: false }).setContent(
-    `${farm.name} - ${farm.total_pigs} pigs.
-    <br> pigs ready to be sent: ${ready_pigs}`);
+  marker.on("mouseover", () => marker.openPopup());
+  marker.on("mouseout", () => marker.closePopup());
 
-  // Show popup on mouseover
-  marker.on("mouseover", () => {
-    marker.bindPopup(popup).openPopup();
+  farmsMarkersRef.current[farm.farm_id] = marker;  // 👈 guardamos la referencia
+});
+
+  // === MARCADORES DE ESCORXADORS ===
+  slaughterhouses.forEach(sh => {
+    const capacitat_operacio = 100 * (sh.target_daily - sh.daily_capacity_min) / (sh.daily_capacity_max - sh.daily_capacity_min);
+
+    let icona;
+    if (capacitat_operacio <= 50) icona = esc_verd;
+    else if (capacitat_operacio >= 90) icona = esc_vermell;
+    else icona = esc_groc;
+
+    const marker = L.marker([sh.lat, sh.lon], { icon: icona }).addTo(map);
+    marker.bindPopup(`${sh.name} - ${sh.target_daily} pigs<br>current_capacity: ${capacitat_operacio}%`);
+
+    marker.on("mouseover", () => marker.openPopup());
+    marker.on("mouseout", () => marker.closePopup());
+
+    // Guardamos referencia
+    slaughterMarkersRef.current[sh.slaughterhouse_id] = marker;
   });
 
-  // Hide popup on mouseout
-  marker.on("mouseout", () => {
-    marker.closePopup();
-  });
-    });
-
-      // ubicacions escorxadors
-    slaughterhouses.forEach(slaughterhouses => {
-
-        const capacitat_operacio = 100*(slaughterhouses.target_daily - slaughterhouses.daily_capacity_min)/(slaughterhouses.daily_capacity_max - slaughterhouses.daily_capacity_min)
-
-        let icona;
-
-        if(capacitat_operacio<=50){
-            icona = {icon: esc_verd}
-        }else if(capacitat_operacio>=90){
-            icona = {icon: esc_vermell}
-        }else{
-            icona = {icon: esc_groc}
-        }
-
-      const marker = L.marker([slaughterhouses.lat, slaughterhouses.lon], icona).addTo(map)
-      const popup = L.popup({ closeOnClick: false, autoClose: false }).setContent(
-    `${slaughterhouses.name} - ${slaughterhouses.target_daily} pigs 
-    <br> current_capacity: ${capacitat_operacio}%`);
-
-  // Show popup on mouseover
-  marker.on("mouseover", () => {
-    marker.bindPopup(popup).openPopup();
-  });
-
-  // Hide popup on mouseout
-  marker.on("mouseout", () => {
-    marker.closePopup();
-  });
-    });
-  // Guarda el mapa perquè altres efectes el puguin usar
   mapRef.current._leaflet_map = map;
 }, []);
 
-
+// === WEBSOCKET ===
 useEffect(() => {
   const map = mapRef.current?._leaflet_map;
-  if (!map) return;   // si el mapa no existeix, no fem res encara
+  if (!map) return;
 
   const ws = new WebSocket("ws://localhost:8000/ws");
 
   ws.onopen = () => console.log("WS connectat");
   ws.onerror = (err) => console.error("WS error:", err);
 
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+
+    // === ACTUALIZAR ESCORXADORS ===
+    if (data.type === "SLAUGHTERHOUSE_UPDATE") {
+  const metrics = data.metrics;
+
+  // usa el id del matadero, que tu backend debería mandar
+  const shId = data.slaughterhouse_id || "S1"; // por defecto S1 si solo hay uno
+  const marker = slaughterMarkersRef.current[shId];
+  if (!marker) return;
+
+  marker.setIcon(
+    metrics.capacity_utilization <= 0.5 ? esc_verd :
+    metrics.capacity_utilization >= 0.9 ? esc_vermell :
+    esc_groc
+  );
+
+  marker.setPopupContent(`
+    <strong>${slaughterhouses.find(s => s.slaughterhouse_id === shId).name} </strong><br>
+    Porcs sacrificats: ${metrics.pigs_delivered} <br>
+    Pes viu total: ${metrics.live_weight_total} kg <br>
+    Pes canals total: ${metrics.carcass_weight_total} kg <br>
+    Pes mitjà viu: ${metrics.avg_live_weight} kg <br>
+    Pes mitjà canal: ${metrics.avg_carcass_weight} kg <br>
+    Capacitat: ${(metrics.capacity_utilization*100).toFixed(1)}%
+  `);
+}
+
+   // ------------------ TRUCK ANIMACIÓN ------------------
   if (data.type === "TRUCK_UPDATE") {
     const pos = data.position;
-
     let marker = trucksRef.current[data.truck_id];
 
     if (marker) {
-      // Actualizar posición
       marker.setLatLng(pos);
-
-      // Actualizar popup si ya existe
       if (marker.getPopup()) {
-        marker.setPopupContent(`${data.truck_id} - ${data.pigs_on_board} pigs`);
+        marker.setPopupContent(`
+          ${data.truck_id} <br>
+          Porcs a bord: ${data.pigs_on_board} <br>
+          Status: ${data.status ?? ""}
+        `);
       }
     } else {
-      // Crear marcador si no existe
       marker = L.marker(pos, { icon: transport }).addTo(map);
-      marker.bindPopup(`${data.truck_id} - ${data.pigs_on_board} pigs`, {
-        closeOnClick: false,
-        autoClose: false
-      });
-
-      // Popups en hover
+      marker.bindPopup(`
+        ${data.truck_id} <br>
+        Porcs a bord: ${data.pigs_on_board} <br>
+        Status: ${data.status ?? ""}
+      `, { closeOnClick: false, autoClose: false });
       marker.on("mouseover", () => marker.openPopup());
       marker.on("mouseout", () => marker.closePopup());
-
-      // Guardamos el marcador
       trucksRef.current[data.truck_id] = marker;
     }
   }
-};
+
+  // ------------------ TRUCK MÉTRICAS DIARIAS ------------------
+  if (data.type === "TRUCKS_UPDATE") {
+    data.trucks.forEach(truck => {
+      let marker = trucksRef.current[truck.truck_id];
+      if (!marker) {
+        // Si no existe, creamos el marcador en la posición del matadero
+        marker = L.marker([map.getCenter().lat, map.getCenter().lng], { icon: transport }).addTo(map);
+        trucksRef.current[truck.truck_id] = marker;
+      }
+
+      // Actualizamos popup
+      marker.bindPopup(`
+        Nom de viatge: ${truck.truck_id} <br>
+        Carrega: ${truck.load_kg} kg <br>
+        Porcs: ${truck.num_pigs} <br>
+        Pes viu mitjà: ${truck.avg_live_weight} kg <br>
+        Granges visitades: ${truck.farms_visited}
+      `);
+      marker.on("mouseover", () => marker.openPopup());
+      marker.on("mouseout", () => marker.closePopup());
+    });
+  }
+    // === ACTUALIZAR GRANGES (opcional) ===
+    if (data.type === "FARM_UPDATE") {
+  const marker = farmsMarkersRef.current[data.farm_id];
+  if (!marker) return;
+
+  marker.bindPopup(`
+    <strong>${data.farm_name}</strong> <br>
+    Total porcs: ${data.new_inventory + data.num_pigs_loaded} <br>
+    Porcs a recollir: ${data.num_pigs_loaded} <br>
+    Pes viu mitjà: ${data.avg_weight} kg
+  `);
+
+  marker.on("mouseover", () => marker.openPopup());
+  marker.on("mouseout", () => marker.closePopup());
+}
+  };
 
   return () => ws.close();
 }, []);
